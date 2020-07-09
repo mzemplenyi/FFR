@@ -1,7 +1,6 @@
 function res = wavfmm4_sim(Y,model,wavespecsy,wavespecsc,pcaspecsx,MCMCspecs,sampleU,get_sigma,twosample,saveraw,blocksize,paramroute) 
-%function res = wavfmm4_gbf(Y,model,wavespecsy,wavespecsc,pcaspecsx,MCMCspecs,sampleU,get_sigma,twosample,blocksize,paramroute) 
 %==========================================================================
-% Note: wavfmm4_gbf.m is based on wavfmm4_update.m.
+% Note: wavfmm4_sim.m is based on wavfmm4_update.m.
 % This version samples tau's and pi's and allows for a more general basis
 % function for the outcome variable. Here we implement a two phase basis 
 % expansion using first wavelets and then PCA decomposition. 
@@ -260,7 +259,7 @@ if ~any(paramroute) % no output of samples
 %         [betahat,beta_025CI,beta_975CI,alphahat,accept_rate_theta,ghat,ghatns,Q025_ghat,Q975_ghat,thetahat,theta_025CI,theta_975CI,tauhat,pihat,...
 %         Sigma,]=...
 %         PostProcess_inMem(MCMC_beta,MCMC_alpha,MCMC_flag_theta,MCMC_theta,MCMC_tau,MCMC_pi,betans,theta,model,wavespecsy,get_sigma,sampleU);
-       postout = PostProcess_sim_rect2(MCMC_beta,MCMC_alpha,MCMC_flag_theta,MCMC_tau,MCMC_pi,MCMC_theta,theta,model,wavespecsc,wavespecsy,pcaspecsx,twosample,get_sigma,sampleU);
+       postout = PostProcess_FFR(MCMC_beta,MCMC_alpha,MCMC_flag_theta,MCMC_tau,MCMC_pi,MCMC_theta,theta,model,wavespecsc,wavespecsy,pcaspecsx,twosample,get_sigma,sampleU);
 %         load('C:/Users/Michele/Dropbox/WFFR Epigenetics/Michele/Test Objects/postMCMC.mat');
 %         postout = PostProcess_sim_rect(postMCMC.MCMC_beta, postMCMC.MCMC_alpha,postMCMC.MCMC_flag_theta, postMCMC.MCMC_tau, postMCMC.MCMC_pi, postMCMC.MCMC_theta,postMCMC.theta,postMCMC.model,postMCMC.wavespecsc, postMCMC.wavespecsy, postMCMC.pcaspecsx,postMCMC.twosample,postMCMC.get_sigma,postMCMC.sampleU);
     else
@@ -311,12 +310,9 @@ res.bstar975CI  = postout.bstar_975CI;
 res.alphahat    = postout.alphahat;
 
 res.Beta        = postout.Beta; % added by MZ 5/5/18 (coefficient surface back in data space but still as vector so we can do FDR sensitivies)
-% res.BetaData    = postout.BetaData; % added by MZ 5/5/2019 to compare Beta unscaled to BetaData (adjusted for scaling)
 if model.nScalarCov > 0 % added  by MZ 11/5/18
     res.betahatScalar = postout.betahatScalar;  %added by MZ 5/2/17
 end
-% res.betahatScalarQ025 = postout.Q025_betahatScalar;  %added by MZ 5/2/17
-% res.betahatScalarQ975 = postout.Q975_betahatScalar;  %added by MZ 5/2/17
 
 if length(model.delt) == 1;
     res.psi         = postout.psi;

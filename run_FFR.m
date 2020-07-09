@@ -111,7 +111,7 @@ MCMCspecs.tau_update        = 1;
 
 %% Run Model
 tic;
-results             = flmm_sim_staticCov3(Y, X, Z, FDR, SIMspecs, TSspecs, MCMCspecs, wavespecsx, wavespecsy, GBF, 0, pcaspecsx); 
+results             = flmm_compress(Y, X, Z, FDR, SIMspecs, TSspecs, MCMCspecs, wavespecsx, wavespecsy, GBF, 0, pcaspecsx); 
 results.runtime     = toc;
 results.Y = Y;
 results.X = X;

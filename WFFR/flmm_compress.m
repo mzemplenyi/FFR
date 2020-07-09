@@ -1,5 +1,4 @@
-function [ res ] = flmm_sim_staticCov3( Y, X, Z, FDR, SIMspecs, TSspecs, MCMCspecs, wavespecsx, wavespecsy, gbf, saveraw, pcaspecsx)
-%function [ res ] = flmm(  )
+function [ res ] = flmm_compress( Y, X, Z, FDR, SIMspecs, TSspecs, MCMCspecs, wavespecsx, wavespecsy, gbf, saveraw, pcaspecsx)
 %==========================================================================
 % Note: flmm is based on wavfmm4_gbf.m.
 % flmm performs function on function regression as described in Meyer,
@@ -8,8 +7,7 @@ function [ res ] = flmm_sim_staticCov3( Y, X, Z, FDR, SIMspecs, TSspecs, MCMCspe
 % function. The outcome function is modeled using DWT. Model assumes T = V.
 %
 % NEWLY CREATED FILE ON 5/2/17 BY MZ to accomodate scalar covariates in
-% addition to time-varying covariates.  We don't want to run the scalar
-% covariates through PCA.
+% addition to time-varying covariates. 
 %==========================================================================
 %   Detailed explanation goes here
     
@@ -107,14 +105,14 @@ function [ res ] = flmm_sim_staticCov3( Y, X, Z, FDR, SIMspecs, TSspecs, MCMCspe
     fprintf('\n Done scaling Y.\n \n');
        
     %% Separate scalar covariates from time varying 
-    if SIMspecs.nScalarCov > 0;
+    if SIMspecs.nScalarCov > 0
         Xs     = X(:, 1:SIMspecs.nScalarCov); % separate off scalar X covariates
         Xt     = X(:, (SIMspecs.nScalarCov+1):end); % separate off time-varying X covariates
-    end;
+    end
     
-    if SIMspecs.nScalarCov == 0; % MZ added 5/7/18 to account for no scalar covaraites case
+    if SIMspecs.nScalarCov == 0 % accounts for no scalar covaraites case
         Xt = X;
-    end;   
+    end   
     
 %% Center and scale Xt by time-point (columns of Xt)
 V = size(Xt,2);  % number of time-varying covariates   
@@ -131,11 +129,11 @@ Xt = scaleXt;
 fprintf('\n Done scaling Xt.\n \n');
     
     %% Check if random effects exist set sampleu accordingly %%
-    if isempty(Z);
+    if isempty(Z)
         MCMCspecs.sampleU           = 0;
     else
         MCMCspecs.sampleU           = 1;
-    end;
+    end
     
     %%
     alph                    = wavespecsx.alph;
@@ -190,7 +188,6 @@ fprintf('\n Done scaling Xt.\n \n');
 
         %% Generate column mean matrix %%
         col_means               = mean(D);
-        %col_mean_mat            = zeros(t,size(D,2)); %MZ added 9/17/18 and commented out line below
         col_mean_mat            = zeros(size(Y,2),size(D,2)); % change time reference from time in X to time in Y
         for i = 1:size(Y,2); % change time reference from time in X to time in Y
             col_mean_mat(i,:)   = col_means;
@@ -207,7 +204,7 @@ fprintf('\n Done scaling Xt.\n \n');
                
         
         % Add the scalar covariates back onto the scaled and PCA-ed X matrix
-        if SIMspecs.nScalarCov > 0; % PCA wit scalar covariates
+        if SIMspecs.nScalarCov > 0; % PCA with scalar covariates
             X     = [Xs Xpc];
         else % PCA with no scalar covariates
             X = Xpc;
@@ -215,12 +212,12 @@ fprintf('\n Done scaling Xt.\n \n');
     else % if gbf = 0
         pcaspecsx.pca            = 0;
         %% Add the scalar covariates back onto the scaled and PCA-ed X matrix
-        if SIMspecs.nScalarCov > 0; % no PCA, yes scalar covariates
+        if SIMspecs.nScalarCov > 0 % no PCA, yes scalar covariates
             X     = [Xs D];
         else % no PCA, no scalar covariates
             X = D;
-        end;
-    end;
+        end
+    end
     %% Include intercept %%
     a   = ones(N,1);  
     model.X     = [a X];
@@ -274,9 +271,9 @@ fprintf('\n Done scaling Xt.\n \n');
     end;
 
 
-    model.nScalarCov = SIMspecs.nScalarCov; %MZ added 2/3/17
-    model.stdXt       = stdXt; %MZ added 5/4/19 so that I can use in PostProcess_sim_rect to rescale beta surface
-    model.stdY       = stdY; %MZ added 5/4/19
+    model.nScalarCov = SIMspecs.nScalarCov; 
+    model.stdXt       = stdXt; 
+    model.stdY       = stdY; 
     model.Z{1}  = Z;
     model.C     = ones(size(Y,1),1);
     model.H     = 1;
@@ -303,19 +300,6 @@ fprintf('\n Done scaling Xt.\n \n');
     %% Run Model %%
     %%% consider blocksize and paramroute or just remove entirely %%%
     res         = wavfmm4_sim(Y,model,wavespecsy,wavespecsc,pcaspecsx,MCMCspecs,sampleU,get_sigma,twosample,saveraw);
-    %res         = wavfmm4_v5_zhu(Y,model,wavespecsy,wavespecsc,pcaspecsx,MCMCspecs,sampleU,get_sigma,twosample,saveraw);
 
-
-    %% RMSE - MZ commented out  %%
-%      extract data estimate and use true surface to calculate RMSE %
-%   trueB       = SIMspecs.trueB;  % 99 x 400
-%     bhat        = res.bhat;  %100 x 400
-%     t           = size(bhat,1);  % scalar 100
-%     one         = ones(t,1); %vector 100 x 1
-%     one_right      = ones(size(bhat,2), 1); % size 400 x 1
-    %mse         = (one'*(bhat-trueB).^2*one_right) / numel(trueB);
-    %res.mse     = 0; % placeholder
-    %res.mse     = mse;
-
-end
+nd
 

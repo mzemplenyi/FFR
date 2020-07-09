@@ -31,7 +31,7 @@ function [ reshape_psi ] = BFDR( Beta, betamax, percSignal, alf, method, nProbes
         else
             phi = pr(gam);
         end
-        psi     = pst > phi; % MZ: before this was "pst >= phi" but this was flagging too much so I changed it to ">" on 1/16/19
+        psi     = pst > phi; 
         reshape_psi     = reshape(psi,nDays,nProbes);
        % reshape_pst    = reshape(pst,nDays,nProbes);
     end    

@@ -5,25 +5,20 @@ function postout = ...
     %% Inputs
     %  MCMC_theta,betans,theta,get_sigma,sampleU,MCMC_U,MCMC_tau,MCMC_pi
     
-    %% Test:
-%     MCMC_beta     = res.MCMC_beta;
-%     model         = res.model;
-%     wavespecsy    = res.wavespecs;
-%     MCMC_tau      = res.MCMC_tau;
-%     MCMC_pi       = res.MCMC_pi;
-
-    %%
     p           = model.p;
-    T           = wavespecsy.T; % post PCA+DWT value of T, total Y time
+    nScalarCov  = model.nScalarCov; 
+    T           = wavespecsy.T; % post PCA+DWT value of T, number of genomic sites
     K           = wavespecsy.K;
-    Tx          = wavespecsc.T;
+    Tx          = wavespecsc.T; % pertains to number of "time" points (compressed) in x space, number of time-varying covariates (not scalar)
     H           = model.H;
     delt        = model.delt;
     alf         = model.alf;
-    if twosample == 1;
+    stdXt        = model.stdXt; 
+    stdY         = model.stdY;  
+    if twosample == 1
         delt0   = model.delt0;
         delt1   = model.delt1;
-    end;
+    end
 
     %% Obtain wavelet/PCA space estimates
     postout.bstarhat            = reshape(mean(MCMC_beta)',K,p)';
@@ -43,50 +38,89 @@ function postout = ...
         meansx      = pcaspecsx.mean_mat;
     end;
     
+   
     %% Update wavelet specs
     if wavespecsc.compress == 1;
         wavespecsc.Kj = wavespecsc.Kj_all;
     end;
+    
+    %% Prepare matrix of scaling factors (stdY/stdXt) to undo the 
+    % scaling of Y and Xt once mcmc samples are in data space 
+    sf = NaN(Tx,T); % matrix to hold scaling factors 
+    for t = 1:T 
+        for v = 1:Tx
+            sf(v,t) = stdY(t)/stdXt(v);
+        end
+    end
+    sfv = reshape(sf,1, Tx* T); % vectorize matrix
 
     %% Perform IDWT in both directions
     %  Consider both one and two sample case
     %  For twosample, perform inference
     %  twosample defaults to 0
-    B       = size(MCMC_beta,1);
+    B       = size(MCMC_beta,1);  
     if twosample == 0;
-        Beta    = NaN(B,Tx*Tx);
-        A       = NaN(B,Tx);
-        for i = 1:B;
-            Betai   = reshape(MCMC_beta(i,:)',K,p)';
+        Beta    = NaN(B,Tx*T); 
+        A       = NaN(B,T);
+        BetaScalar = NaN(B, T*nScalarCov); 
+        for i = 1:B
+            Betai   = reshape(MCMC_beta(i,:)',K,p)'; % p x K (because tranpose)
             
             %% Project back into Y space
-            As          = Betai(1,:);
-            beta_temp   = Betai(2:end,:);
+            As          = Betai(1,:); 
             A1          = idwt_rows(As,wavespecsy);
-            yidwt       = idwt_rows(beta_temp,wavespecsy);
+            if nScalarCov > 0;
+                betaSc   = Betai(2:(1+nScalarCov), :); % add 1 to account for intercept column
+                betaSc_idwt = idwt_rows(betaSc, wavespecsy);               
+                beta_temp = Betai((2+nScalarCov):end, :); 
+                yidwt       = idwt_rows(beta_temp,wavespecsy);
+            else 
+                beta_temp   = Betai(2:end,:);
+                yidwt       = idwt_rows(beta_temp,wavespecsy);
+            end;
+              
             
-            %% Remove and update intercept
+            
+            %% Remove and update intercept and scalar covariates
             A(i,:)      = A1;
-                        
-            %% PCA and Wavelet inverse
-            if pcaspecsx.pca == 1;
+            if nScalarCov > 0
+                BetaScalar(i, :) = reshape(betaSc_idwt, 1, T*nScalarCov);               
+            end   
+
+            %% PCA and Wavelet inverse - just performed on time-varying covariates stored in yidwt
+            if pcaspecsx.pca == 1
                 pcaCol              = pcaspecsx.output(pcaspecsx.output(:,1) == pcalevelx,2);
-                temp                = zeros(size(scorex,2),Tx);
+                temp                = zeros(size(scorex,2),T); % changed to T, time in Y 
                 temp(1:pcaCol,:)    = yidwt;
                 Betai               = (temp'/coefx + meansx)';                
             end;
+            if pcaspecsx.pca == 0
+                Betai = yidwt;
+            end;
             if wavespecsc.compress == 1;
                 temp                        = zeros(size(Betai',1),length(wavespecsc.keep));
-                temp(:,wavespecsc.keep==1)  = Betai';
+              temp(:,wavespecsc.keep==1)  = Betai';
                 Betai                       = temp;
             end;
             Betai       = idwt_rows(Betai,wavespecsc)';
-            Beta(i,:)   = reshape(Betai,1,Tx*Tx);
-
+            Beta(i,:)   = reshape(Betai,1,Tx*T); % previously Tx*Tx
+            
             if mod(i,100) == 0;
                 fprintf('\n Done projecting MCMC samples M = %d \n',i);
             end;       
-        end;
+        end;% end loop over the B mcmc samples
+        
+% Adjust mcmc samples of Beta for original scaling of Y and Xt
+%        BetaData = NaN(B,Tx*T);
+%        coeffs = size(Beta, 2);
+%        for i=1:coeffs
+%              BetaData(:,i) = Beta(:, i) .* sfv(i); % using scaling factor vector
+%        end
+%        Beta = BetaData; % replace unscaled version of surface with scaled version
+
+       
+    % Below pertains to two-sample case which currently does not handle a
+    % rectangular association surface
     else
         Beta0   = NaN(B,Tx*Tx);
         Beta1   = NaN(B,Tx*Tx);
@@ -154,31 +188,96 @@ function postout = ...
         end;
     end;
     
+        fprintf('\n dimension Beta Scalar  = %d \n',size(BetaScalar));
+        fprintf('\n dimension Beta = %d \n',size(Beta));
+        
+   
     %% Implement FDR
     if twosample == 0;
-        R       = size(Beta,2);
-        pst     = NaN(R,1);
-        lFDR    = NaN(R,1);
-        for r = 1:R;
-            Betar       = abs(Beta(:,r));
-            pst(r)      = (1/B)*size(find(Betar > delt),1);
-            if pst(r) == 1;
-                pst(r)  = 1 - (2*B)^(-1);
+        if length(delt) == 1;
+            R       = size(Beta,2);
+            pst     = NaN(R,1);
+            lFDR    = NaN(R,1);
+            for r = 1:R;
+                Betar       = abs(Beta(:,r));
+                pst(r)      = (1/B)*size(find(Betar > delt),1);
+                if pst(r) == 1;
+                    pst(r)  = 1 - (2*B)^(-1);
+                end;
+                lFDR(r)     = 1 - pst(r);
             end;
-            lFDR(r)     = 1 - pst(r);
+            if sum(pst) == 0;
+                fprintf('\n No coef > delta found for BFDR.\n \n');
+                psi = zeros(Tx*T, 1); % added MZ 9/31/2018 so we don't hit an error later when reshaping postout.psi
+                %psi = 0;
+                %error('No coef > delta'); % commented out by MZ 5/14/18                
+            else
+                pr      = sort(pst,'descend');
+                rstar   = cumsum(1-pr)./linspace(1,R,R)';
+                gam     = find(rstar <= alf, 1, 'last' );
+                if isempty(gam);
+                    phi = 1;
+                else
+                    phi = pr(gam);
+                end;
+                psi     = pst >= phi;
+            end;
         end;
-        if sum(pst) == 0;
-            error('No coef > delta');
+        if length(delt) == 2;
+            dStrict = delt(1);
+            dLax    = delt(2);
+            
+            %% Strict FDR %%
+            R       = size(Beta,2);
+            pst     = NaN(R,1);
+            lFDR    = NaN(R,1);
+            for r = 1:R;
+                Betar       = abs(Beta(:,r));
+                pst(r)      = (1/B)*size(find(Betar > dStrict),1);
+                if pst(r) == 1;
+                    pst(r)  = 1 - (2*B)^(-1);
+                end;
+                lFDR(r)     = 1 - pst(r);
+            end;
+            if sum(pst) == 0;
+                error('No coef > delta');
+            end;
+            pr      = sort(pst,'descend');
+            rstar   = cumsum(1-pr)./linspace(1,R,R)';
+            gam     = find(rstar <= alf, 1, 'last' );
+            if isempty(gam);
+                phi = 1;
+            else
+                phi = pr(gam);
+            end;
+            psiStrict   = pst >= phi;
+
+            %% Lax FDR %%
+            R       = size(Beta,2);
+            pst     = NaN(R,1);
+            lFDR    = NaN(R,1);
+            for r = 1:R;
+                Betar       = abs(Beta(:,r));
+                pst(r)      = (1/B)*size(find(Betar > dLax),1);
+                if pst(r) == 1;
+                    pst(r)  = 1 - (2*B)^(-1);
+                end;
+                lFDR(r)     = 1 - pst(r);
+            end;
+            if sum(pst) == 0;
+                error('No coef > delta');
+            end;
+            pr      = sort(pst,'descend');
+            rstar   = cumsum(1-pr)./linspace(1,R,R)';
+            gam     = find(rstar <= alf, 1, 'last' );
+            if isempty(gam);
+                phi = 1;
+            else
+                phi = pr(gam);
+            end;
+            psiLax   = pst >= phi;
         end;
-        pr      = sort(pst,'descend');
-        rstar   = cumsum(1-pr)./linspace(1,R,R)';
-        gam     = find(rstar <= alf, 1, 'last' );
-        if isempty(gam);
-            phi = 1;
-        else
-            phi = pr(gam);
-        end;
-        psi     = pst >= phi;
+%    Note: below pertains to two sample case
     else
         %% FDR on Diff %%
         R   = size(Diff,2);
@@ -256,7 +355,13 @@ function postout = ...
         psi1    = pst1 >= phi1;
     end;
     
-    postout.psi     = reshape(psi,Tx,Tx);
+    if length(delt) == 1;
+        postout.psi     = reshape(psi,Tx,T); %check if T, Tx or Tx, T % previously Tx, Tx
+    end;
+    if length(delt) == 2;
+        postout.psiStrict   = reshape(psiStrict,Tx,T);
+        postout.psiLax      = reshape(psiLax,Tx,T);
+    end;
     fprintf('\n Done calculating FDR.\n \n');
     
     %% Then average and find credible interval, update postout
@@ -270,15 +375,20 @@ function postout = ...
            end
         end
         
-        postout.pwCI        = reshape(pwCI,Tx,Tx);
-        postout.Q025_bhat   = reshape(Q025_bhat,Tx,Tx);
-        postout.Q975_bhat   = reshape(Q975_bhat,Tx,Tx);
-        postout.bhat        = reshape(mean(Beta),Tx,Tx);
-        
+        postout.pwCI        = reshape(pwCI,Tx,T);
+        postout.Q025_bhat   = reshape(Q025_bhat,Tx,T);
+        postout.Q975_bhat   = reshape(Q975_bhat,Tx,T);
+        postout.bhat        = reshape(mean(Beta),Tx,T);
+        postout.Beta        = Beta; % added for purposes of running FDR sensitivity checks
+     
 
         postout.Q025_ahat   = quantile(A,0.025);
         postout.Q975_ahat   = quantile(A,0.975);
         postout.ahat        = mean(A);
+        
+        if nScalarCov > 0 ;
+            postout.betahatScalar = reshape(mean(BetaScalar),nScalarCov, T); 
+        end;
     else
         %% group 0 %%
         Q025_bhat0          = quantile(Beta0,0.025);
@@ -290,10 +400,10 @@ function postout = ...
            end
         end
         
-        postout.pwCI0       = reshape(pwCI0,Tx,Tx);
-        postout.Q025_bhat0  = reshape(Q025_bhat0,Tx,Tx);
-        postout.Q975_bhat0  = reshape(Q975_bhat0,Tx,Tx);
-        postout.bhat0       = reshape(mean(Beta0),Tx,Tx);
+        postout.pwCI0       = reshape(pwCI0,Tx,T);
+        postout.Q025_bhat0  = reshape(Q025_bhat0,Tx,T);
+        postout.Q975_bhat0  = reshape(Q975_bhat0,Tx,T);
+        postout.bhat0       = reshape(mean(Beta0),Tx,T);
         
         %% group 1 %%
         Q025_bhat1          = quantile(Beta1,0.025);
@@ -305,25 +415,25 @@ function postout = ...
            end
         end
         
-        postout.pwCI1       = reshape(pwCI1,Tx,Tx);
-        postout.Q025_bhat1  = reshape(Q025_bhat1,Tx,Tx);
-        postout.Q975_bhat1  = reshape(Q975_bhat1,Tx,Tx);
-        postout.bhat1       = reshape(mean(Beta1),Tx,Tx);
+        postout.pwCI1       = reshape(pwCI1,Tx,T);
+        postout.Q025_bhat1  = reshape(Q025_bhat1,Tx,T);
+        postout.Q975_bhat1  = reshape(Q975_bhat1,Tx,T);
+        postout.bhat1       = reshape(mean(Beta1),Tx,T);
         
         %% diff %%
         Q025_diff           = quantile(Diff,0.025);
         Q975_diff           = quantile(Diff,0.975);
-        pwCId               = ones(size(Q975_diff));
+        pwCId               = ones(size(Q975_bhatd));
         for i = 1:length(pwCId)
            if Q025_diff(i) < 0 && Q975_diff(i) > 0
                pwCId(i)      = 0;
            end
         end
         
-        postout.pwCId       = reshape(pwCId,Tx,Tx);
-        postout.Q025_diff   = reshape(Q025_diff,Tx,Tx);
-        postout.Q975_diff   = reshape(Q975_diff,Tx,Tx);
-        postout.diff        = reshape(mean(Diff),Tx,Tx);
+        postout.pwCId       = reshape(pwCId,Tx,T);
+        postout.Q025_diff   = reshape(Q025_diff,Tx,T);
+        postout.Q975_diff   = reshape(Q975_diff,Tx,T);
+        postout.diff        = reshape(mean(Diff),Tx,T);
 
         %% intercepts %%
         postout.Q025_ahat0  = quantile(A0,0.025);
@@ -335,8 +445,8 @@ function postout = ...
         postout.ahat1       = mean(A1);
 
         %% group specific psi %%
-        postout.psi0        = reshape(psi0,Tx,Tx);
-        postout.psi1        = reshape(psi1,Tx,Tx);
+        postout.psi0        = reshape(psi0,Tx,T);
+        postout.psi1        = reshape(psi1,Tx,T);
     end;
     fprintf('\n Done averaging and finding CIs.\n \n');
     
@@ -345,34 +455,34 @@ function postout = ...
     if twosample == 0
         [MAPS, upper_CI, lower_CI]  = jointband_maps(Beta,alf);
         
-        postout.MAPs                = reshape(MAPS,Tx,Tx);
-        postout.UMAPs               = reshape(upper_CI,Tx,Tx);
-        postout.LMAPs               = reshape(lower_CI,Tx,Tx);
+        postout.MAPs                = reshape(MAPS,Tx,T);
+        postout.UMAPs               = reshape(upper_CI,Tx,T);
+        postout.LMAPs               = reshape(lower_CI,Tx,T);
     else
         %% group 0 %%
         [MAPS0, upper_CI0, lower_CI0]   = jointband_maps(Beta0,alf/2);
         
-        postout.MAPs0                   = reshape(MAPS0,Tx,Tx);
-        postout.UMAPs0                  = reshape(upper_CI0,Tx,Tx);
-        postout.LMAPs0                  = reshape(lower_CI0,Tx,Tx);
+        postout.MAPs0                   = reshape(MAPS0,Tx,T);
+        postout.UMAPs0                  = reshape(upper_CI0,Tx,T);
+        postout.LMAPs0                  = reshape(lower_CI0,Tx,T);
         
         %% group 1 %%
         [MAPS1, upper_CI1, lower_CI1]   = jointband_maps(Beta1,alf/2);
         
-        postout.MAPs1                   = reshape(MAPS1,Tx,Tx);
-        postout.UMAPs1                  = reshape(upper_CI1,Tx,Tx);
-        postout.LMAPs1                  = reshape(lower_CI1,Tx,Tx);
+        postout.MAPs1                   = reshape(MAPS1,Tx,T);
+        postout.UMAPs1                  = reshape(upper_CI1,Tx,T);
+        postout.LMAPs1                  = reshape(lower_CI1,Tx,T);
 
         %% diff %%
         [MAPSd, upper_CId, lower_CId]   = jointband_maps(Diff,alf);
         
-        postout.MAPsD                   = reshape(MAPSd,Tx,Tx);
-        postout.UMAPsD                  = reshape(upper_CId,Tx,Tx);
-        postout.LMAPsD                  = reshape(lower_CId,Tx,Tx);
+        postout.MAPsD                   = reshape(MAPSd,Tx,T);
+        postout.UMAPsD                  = reshape(upper_CId,Tx,T);
+        postout.LMAPsD                  = reshape(lower_CId,Tx,T);
 
     end
     fprintf('\n Done calculating MAPs.\n \n');
-    
+
     %% Additional output of interest
     if sampleU == 1
         M                   = model.M;
